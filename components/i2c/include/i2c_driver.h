@@ -1,12 +1,12 @@
 /**********************************************************************
-* - Description:		harvest-cloud-simcom-esp32
+* - Description:		esp32-mpu6050
 * - File:				i2c_driver.h
 * - Compiler:			xtensa-esp32
 * - Debugger:			USB2USART
 * - Author:				Mohamed El-Sabagh
 * - Target:				ESP32
-* - Created:			2017-7-29
-* - Last changed:		2017-7-29
+* - Created:			2017-12-11
+* - Last changed:		2017-12-11
 *
 **********************************************************************/
 #ifndef _I2C_DRIVER_H

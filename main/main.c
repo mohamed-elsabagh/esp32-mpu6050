@@ -1,42 +1,79 @@
-#include "freertos/FreeRTOS.h"
-#include "esp_wifi.h"
-#include "esp_system.h"
-#include "esp_event.h"
-#include "esp_event_loop.h"
-#include "nvs_flash.h"
-#include "driver/gpio.h"
+/**********************************************************************
+* - Description:		esp32-mpu6050
+* - File:				main.c
+* - Compiler:			xtensa-esp32
+* - Debugger:			USB2USART
+* - Author:				Mohamed El-Sabagh
+* - Target:				ESP32
+* - Created:			2017-12-11
+* - Last changed:		2017-12-11
+*
+**********************************************************************/
 
-esp_err_t event_handler(void *ctx, system_event_t *event)
-{
-    return ESP_OK;
-}
+#include "AppConfig.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOSConfig.h"
+#include "freertos/task.h"
+#include "i2c_application.h"
+#include "i2c_driver.h"
+#include "nvs_flash.h"
+#include "mpu6050_application.h"
+
+#define STACK_SIZE_2048 2048
+
+/* Structure that will hold the TCB of the task being created. */
+StaticTask_t xI2CWriteTaskBuffer;
+StaticTask_t xI2CReadTaskBuffer;
+StaticTask_t xMPU6050TaskBuffer;
+/* Buffer that the task being created will use as its stack.  Note this is
+    an array of StackType_t variables.  The size of StackType_t is dependent on
+    the RTOS port. */
+StackType_t xStack_I2C_Write[ STACK_SIZE_2048 ];
+StackType_t xStack_I2C_Read[ STACK_SIZE_2048 ];
+StackType_t xStack_MPU6050Task[ STACK_SIZE_2048 ];
 
 void app_main(void)
 {
-    nvs_flash_init();
-    tcpip_adapter_init();
-    ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-    wifi_config_t sta_config = {
-        .sta = {
-            .ssid = "access_point_name",
-            .password = "password",
-            .bssid_set = false
-        }
-    };
-    ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &sta_config) );
-    ESP_ERROR_CHECK( esp_wifi_start() );
-    ESP_ERROR_CHECK( esp_wifi_connect() );
-
-    gpio_set_direction(GPIO_NUM_4, GPIO_MODE_OUTPUT);
-    int level = 0;
-    while (true) {
-        gpio_set_level(GPIO_NUM_4, level);
-        level = !level;
-        vTaskDelay(300 / portTICK_PERIOD_MS);
+    esp_err_t ret;
+    // Initialize NVS.
+    ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-}
+    ESP_ERROR_CHECK(ret);
 
+    // Initializations
+	vI2CInit();
+
+    xTaskCreateStaticPinnedToCore(vI2CWrite,            /* Function that implements the task. */
+                                  "vI2CWrite",          /* Text name for the task. */
+                                  STACK_SIZE_2048,      /* Number of indexes in the xStack array. */
+                                  NULL,                 /* Parameter passed into the task. */
+                                  osPriorityHigh,       /* Priority at which the task is created. */
+                                  xStack_I2C_Write,     /* Array to use as the task's stack. */
+                                  &xI2CWriteTaskBuffer, /* Variable to hold the task's data structure. */
+                                  0                     /*  0 for PRO_CPU, 1 for APP_CPU, or tskNO_AFFINITY which allows the task to run on both */
+                                  );
+
+    xTaskCreateStaticPinnedToCore(vI2CRead,            /* Function that implements the task. */
+                                  "vI2CRead",          /* Text name for the task. */
+                                  STACK_SIZE_2048,     /* Number of indexes in the xStack array. */
+                                  NULL,                /* Parameter passed into the task. */
+                                  osPriorityHigh,      /* Priority at which the task is created. */
+                                  xStack_I2C_Read,     /* Array to use as the task's stack. */
+                                  &xI2CReadTaskBuffer, /* Variable to hold the task's data structure. */
+                                  0                    /*  0 for PRO_CPU, 1 for APP_CPU, or tskNO_AFFINITY which allows the task to run on both */
+                                  );
+
+    xTaskCreateStaticPinnedToCore(vMPU6050Task,        /* Function that implements the task. */
+                                  "vMPU6050Task",      /* Text name for the task. */
+                                  STACK_SIZE_2048,     /* Number of indexes in the xStack array. */
+                                  NULL,                /* Parameter passed into the task. */
+                                  osPriorityNormal,    /* Priority at which the task is created. */
+                                  xStack_MPU6050Task,  /* Array to use as the task's stack. */
+                                  &xMPU6050TaskBuffer, /* Variable to hold the task's data structure. */
+                                  0                    /*  0 for PRO_CPU, 1 for APP_CPU, or tskNO_AFFINITY which allows the task to run on both */
+                                  );
+}

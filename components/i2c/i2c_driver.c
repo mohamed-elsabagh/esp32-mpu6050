@@ -1,12 +1,12 @@
 /**********************************************************************
-* - Description:		harvest-cloud-simcom-esp32
+* - Description:		esp32-mpu6050
 * - File:				i2c_driver.c
 * - Compiler:			xtensa-esp32
 * - Debugger:			USB2USART
 * - Author:				Mohamed El-Sabagh
 * - Target:				ESP32
-* - Created:			2017-7-29
-* - Last changed:		2017-7-29
+* - Created:			2017-12-11
+* - Last changed:		2017-12-11
 *
 **********************************************************************/
 
@@ -15,7 +15,7 @@
 #define I2C_MASTER_NUM 					I2C_NUM_1   /*!< I2C port number for master dev */
 #define I2C_MASTER_SCL_IO    			19    		/*!< gpio number for I2C master clock */
 #define I2C_MASTER_SDA_IO    			18    		/*!< gpio number for I2C master data  */
-#define I2C_MASTER_FREQ_HZ    			90000     	/*!< I2C master clock frequency */
+#define I2C_MASTER_FREQ_HZ    			100000     	/*!< I2C master clock frequency */
 #define I2C_MASTER_TX_BUF_DISABLE   	0   		/*!< I2C master do not need buffer */
 #define I2C_MASTER_RX_BUF_DISABLE   	0   		/*!< I2C master do not need buffer */
 #define WRITE_BIT  						I2C_MASTER_WRITE /*!< I2C master write */
