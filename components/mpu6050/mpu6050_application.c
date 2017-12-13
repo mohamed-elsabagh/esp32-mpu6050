@@ -135,6 +135,8 @@ static angle_calculations roll_angle_calculations = {
 void vMPU6050Task( void *pvParameters )
 {
     uint16_t count = 0;
+    uint8_t status = 0;     // 0 not flipped, 1 rotated, 2 180 degree flipped
+
     if (uMPU6050Init() != MPU6050_SUCESS) {
         vTaskDelete(NULL);
         return;
@@ -163,6 +165,35 @@ void vMPU6050Task( void *pvParameters )
             ESP_LOGI("mpu6050", "FPitch: %.3f", angle_pitch);
             ESP_LOGI("mpu6050", "FRoll: %.3f", angle_roll);
             ESP_LOGI("mpu6050", "Temperature: %.3f", temperature);
+
+            status = 0;
+            if (angle_pitch > 5 || angle_pitch < -5 || angle_roll > 5 || angle_roll < -5)
+            {
+                status = 1;
+            }
+            else
+            {
+                // angles of pitch and rotation are almost zero, check whether flipped 180 degree or 0 degree
+                if (a_z > 0)
+                {
+                    // flipped 180 degree
+                    status = 2;
+                }
+            }
+
+            if (status == 0)
+            {
+                ESP_LOGI("mpu6050", "MPU6050 is right side");
+            }
+            else if (status == 1)
+            {
+                ESP_LOGI("mpu6050", "MPU6050 is rotated");
+            }
+            else if (status == 2)
+            {
+                ESP_LOGI("mpu6050", "MPU6050 is 180 degree flipped");
+            }
+
             count = 0;
         }
 
