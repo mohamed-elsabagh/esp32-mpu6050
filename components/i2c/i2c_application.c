@@ -16,6 +16,8 @@
 #define WRITE_ITEM_SIZE         sizeof( I2C_Status )
 #define READ_ITEM_SIZE          sizeof( I2C_Status )
 
+#define GUARD_CYCLE		10
+
 /* Extern Variables	*/
 /* Declare a variable of type xQueueHandle.  This is used to store the queue
 	that is accessed by any task wants to write to I2C. */
@@ -90,6 +92,8 @@ void vI2CWrite( void *pvParameters )
 			sI2cMasterWriteSlave(lReceivedValue.pBuffer, lReceivedValue.sDataLength,
 					lReceivedValue.slaveAddress);
 
+			vTaskDelay( GUARD_CYCLE / portTICK_RATE_MS );
+
 			/* 'Give' the semaphore to unblock the task. */
 			xSemaphoreGive( xBinarySemaphoreI2CAppEndOfWrite );
 		}
@@ -155,6 +159,8 @@ void vI2CRead( void *pvParameters )
 			/* Read from I2C */
 			sI2cMasterReadSlave(lReceivedValue.pBuffer, lReceivedValue.sDataLength,\
 					lReceivedValue.slaveAddress);
+
+			vTaskDelay( GUARD_CYCLE / portTICK_RATE_MS );
 
 			/* 'Give' the semaphore to unblock the task. */
 			xSemaphoreGive( xBinarySemaphoreI2CAppEndOfRead );

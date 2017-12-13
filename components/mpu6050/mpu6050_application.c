@@ -14,7 +14,9 @@
 #include "AppConfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <stdio.h>
+#include "kalman_filter.h"
+#include <math.h>
+#include "esp_log.h"
 
 #define MPU6050_SLAVE_ADDR          0x68
 
@@ -35,22 +37,19 @@
 #define MPU6050_PWR_MGMT_1          0x6B
 #define MPU6050_ACCEL_CONFIG        0x1C
 #define MPU6050_GYRO_CONFIG         0x1B
+#define MPU6050_SMPLRT_DIV          0x19
+#define MPU6050_CONFIG              0x1A
 
-int16_t accelration_x = 0;
-int16_t accelration_y = 0;
-int16_t accelration_z = 0;
+double a_x = 0.0;
+double a_y = 0.0;
+double a_z = 0.0;
 
-double gforce_x = 0.0;
-double gforce_y = 0.0;
-double gforce_z = 0.0;
+double g_x = 0.0;
+double g_y = 0.0;
+double g_z = 0.0;
 
-int16_t gyro_x = 0.0;
-int16_t gyro_y = 0.0;
-int16_t gyro_z = 0.0;
-
-double rot_x = 0.0;
-double rot_y = 0.0;
-double rot_z = 0.0;
+double angle_pitch = 0.0;
+double angle_roll = 0.0;
 
 double temperature = 0.0;
 
@@ -59,7 +58,7 @@ static uint8_t mpu6050Buffer[MICRO_BUFFER_SIZE];
 
 #define MPU6050_SUCESS					 	       0
 #define MPU6050_FAILURE						       1
-#define ACCELEROMETER_READING_FREQUENCY_MS	     1000	// 1 second
+#define ACCELEROMETER_READING_FREQUENCY_MS	     REFRESH_RATE * 1000	// 5ms second
 
 #define _2G_SCALE               0x00
 #define _4G_SCALE               0x08
@@ -85,6 +84,48 @@ static uint8_t uMPU6050Init();
 static uint8_t uMPU6050ReadAccelerometer();
 static uint8_t uMPU6050ReadGyroscope();
 static uint8_t uMPU6050ReadTemperature();
+static void vMPU6050CalculateAngles();
+
+static angle_calculations pitch_angle_calculations = {
+    .angle = 0.0,
+    .gyro_y = 0.0,
+    .q_bias = 0.0,
+    .angle_err = 0.0,
+    .q_angle = 0.1,
+    .q_gyro = 0.1,
+    .r_angle = 0.5,
+    .dt = REFRESH_RATE,
+    .c_0 = 1,
+    .pct_0 = 0.0,
+    .pct_1 = 0.0,
+    .e = 0.0,
+    .k_0 = 0,
+    .k_1 = 0,
+    .t_0 = 0,
+    .t_1 = 0,
+    .pdot = {0, 0, 0, 0},
+    .pp = {{1, 0}, {0, 1}}
+};
+static angle_calculations roll_angle_calculations = {
+    .angle = 0.0,
+    .gyro_y = 0.0,
+    .q_bias = 0.0,
+    .angle_err = 0.0,
+    .q_angle = 0.1,
+    .q_gyro = 0.1,
+    .r_angle = 0.5,
+    .dt = REFRESH_RATE,
+    .c_0 = 1,
+    .pct_0 = 0.0,
+    .pct_1 = 0.0,
+    .e = 0.0,
+    .k_0 = 0,
+    .k_1 = 0,
+    .t_0 = 0,
+    .t_1 = 0,
+    .pdot = {0, 0, 0, 0},
+    .pp = {{1, 0}, {0, 1}}
+};
 
 /**
   * @brief  MPU6050 task.
@@ -93,6 +134,7 @@ static uint8_t uMPU6050ReadTemperature();
   */
 void vMPU6050Task( void *pvParameters )
 {
+    uint16_t count = 0;
     if (uMPU6050Init() != MPU6050_SUCESS) {
         vTaskDelete(NULL);
         return;
@@ -112,28 +154,17 @@ void vMPU6050Task( void *pvParameters )
             continue;
         }
 
-        printf("##### Acceleration #####\n");
-        printf("Acceleration X = %d\n", accelration_x);
-        printf("Acceleration Y = %d\n", accelration_y);
-        printf("Acceleration Z = %d\n", accelration_z);
-        printf("\n");
-        printf("##### Gravity force #####\n");
-        printf("G Force X = %f\n", gforce_x);
-        printf("G Force Y = %f\n", gforce_y);
-        printf("G Force Z = %f\n", gforce_z);
-        printf("\n");
-        printf("##### Gyroscope #####\n");
-        printf("Gyroscope X = %d\n", gyro_x);
-        printf("Gyroscope Y = %d\n", gyro_y);
-        printf("Gyroscope Z = %d\n", gyro_z);
-        printf("\n");
-        printf("##### Rotation #####\n");
-        printf("Rotation X = %f\n", rot_x);
-        printf("Rotation Y = %f\n", rot_x);
-        printf("Rotation Z = %f\n", rot_x);
-        printf("\n");
-        printf("##### Temperature #####\n");
-        printf("Temperature = %f\n", temperature);
+        vMPU6050CalculateAngles();
+        count++;
+        if (count >= 20)
+        {
+            ESP_LOGI("mpu6050", "Acc: ( %.3f, %.3f, %.3f)", a_x, a_y, a_z);
+            ESP_LOGI("mpu6050", "Gyro: ( %.3f, %.3f, %.3f)", g_x, g_y, g_z);
+            ESP_LOGI("mpu6050", "FPitch: %.3f", angle_pitch);
+            ESP_LOGI("mpu6050", "FRoll: %.3f", angle_roll);
+            ESP_LOGI("mpu6050", "Temperature: %.3f", temperature);
+            count = 0;
+        }
 
         vTaskDelay( ACCELEROMETER_READING_FREQUENCY_MS / portTICK_RATE_MS );
     }
@@ -160,6 +191,9 @@ uint8_t uMPU6050Init()
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
@@ -175,6 +209,9 @@ uint8_t uMPU6050Init()
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
@@ -182,13 +219,16 @@ uint8_t uMPU6050Init()
 
     // Configure gyroscope
     mpu6050Buffer[0] = MPU6050_GYRO_CONFIG;
-    mpu6050Buffer[1] = _250_DEGREE;        // +/-250degree
+    mpu6050Buffer[1] = _2000_DEGREE;        // +/-2000degree
     // Write data to i2c
     i2cStatus.pBuffer = mpu6050Buffer;
     i2cStatus.sDataLength = 2;
     i2cStatus.slaveAddress = MPU6050_SLAVE_ADDR;
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
+
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
 
     if (xStatus == pdFAIL)
 	{
@@ -216,6 +256,9 @@ uint8_t uMPU6050ReadAccelerometer()
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
@@ -227,26 +270,29 @@ uint8_t uMPU6050ReadAccelerometer()
 
     xStatus = xQueueSend( xQueueI2CReadBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of reading process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfRead, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
 	}
 
-    accelration_x =
+    int16_t accelration_x =
         ((uint16_t)(mpu6050Buffer[0] << 8)) |
         ((uint16_t)(mpu6050Buffer[1]));
 
-    accelration_y =
+    int16_t accelration_y =
         ((uint16_t)(mpu6050Buffer[2] << 8)) |
         ((uint16_t)(mpu6050Buffer[3]));
 
-    accelration_z =
+    int16_t accelration_z =
         ((uint16_t)(mpu6050Buffer[4] << 8)) |
         ((uint16_t)(mpu6050Buffer[5]));
 
-    gforce_x = accelration_x / LSB_Sensitivity_2G;
-    gforce_y = accelration_y / LSB_Sensitivity_2G;
-    gforce_z = accelration_z / LSB_Sensitivity_2G;
+    a_x = -accelration_x / LSB_Sensitivity_2G;
+    a_y = -accelration_y / LSB_Sensitivity_2G;
+    a_z = -accelration_z / LSB_Sensitivity_2G;
 
     return MPU6050_SUCESS;
 }
@@ -269,6 +315,9 @@ uint8_t uMPU6050ReadGyroscope()
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
@@ -280,26 +329,29 @@ uint8_t uMPU6050ReadGyroscope()
 
     xStatus = xQueueSend( xQueueI2CReadBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of reading process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfRead, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
 	}
 
-    gyro_x =
+    int16_t gyro_x =
         ((uint16_t)(mpu6050Buffer[0] << 8)) |
         ((uint16_t)(mpu6050Buffer[1]));
 
-    gyro_y =
+    int16_t gyro_y =
         ((uint16_t)(mpu6050Buffer[2] << 8)) |
         ((uint16_t)(mpu6050Buffer[3]));
 
-    gyro_z =
+    int16_t gyro_z =
         ((uint16_t)(mpu6050Buffer[4] << 8)) |
         ((uint16_t)(mpu6050Buffer[5]));
 
-    rot_x = gyro_x / LSB_Sensitivity_250;
-    rot_y = gyro_y / LSB_Sensitivity_250;
-    rot_z = gyro_z / LSB_Sensitivity_250;
+    g_x = gyro_x / LSB_Sensitivity_2000;
+    g_y = gyro_y / LSB_Sensitivity_2000;
+    g_z = gyro_z / LSB_Sensitivity_2000;
 
     return MPU6050_SUCESS;
 }
@@ -322,6 +374,9 @@ uint8_t uMPU6050ReadTemperature()
 
     xStatus = xQueueSend( xQueueI2CWriteBuffer, (void *)&i2cStatus, portMAX_DELAY );
 
+    // Wait for end of writing process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfWrite, portMAX_DELAY );
+
     if (xStatus == pdFAIL)
 	{
 		return MPU6050_FAILURE;
@@ -332,6 +387,9 @@ uint8_t uMPU6050ReadTemperature()
     i2cStatus.slaveAddress = MPU6050_SLAVE_ADDR;
 
     xStatus = xQueueSend( xQueueI2CReadBuffer, (void *)&i2cStatus, portMAX_DELAY );
+
+    // Wait for end of reading process
+    xStatus = xSemaphoreTake( xBinarySemaphoreI2CAppEndOfRead, portMAX_DELAY );
 
     if (xStatus == pdFAIL)
 	{
@@ -345,4 +403,17 @@ uint8_t uMPU6050ReadTemperature()
     temperature = (raw_temp / 340.0) + 36.53;
 
     return MPU6050_SUCESS;
+}
+
+/**
+  * @brief  Calculate rolling and pitch angles.
+  * @param  None
+  * @retval None
+  */
+void vMPU6050CalculateAngles()
+{
+    double pitch = atan(a_x / a_z)*57.2958;        // convert the radian to degrees
+    double roll = atan(a_y / a_z)*57.2958;         // convert the radian to degrees
+    angle_pitch = filter(pitch, g_y, &pitch_angle_calculations);
+    angle_roll = filter(roll, -g_x, &roll_angle_calculations);
 }

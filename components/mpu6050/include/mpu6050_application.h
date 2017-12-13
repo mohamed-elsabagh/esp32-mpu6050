@@ -14,21 +14,16 @@
 
 #include <stdint.h>
 
-extern int16_t accelration_x;
-extern int16_t accelration_y;
-extern int16_t accelration_z;
+extern double a_x;
+extern double a_y;
+extern double a_z;
 
-extern double gforce_x;
-extern double gforce_y;
-extern double gforce_z;
+extern double g_x;
+extern double g_y;
+extern double g_z;
 
-extern int16_t gyro_x;
-extern int16_t gyro_y;
-extern int16_t gyro_z;
-
-extern double rot_x;
-extern double rot_y;
-extern double rot_z;
+extern double angle_pitch;
+extern double angle_roll;
 
 extern double temperature;
 
