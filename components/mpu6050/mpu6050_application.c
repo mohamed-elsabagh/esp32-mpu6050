@@ -80,11 +80,15 @@ static uint8_t mpu6050Buffer[MICRO_BUFFER_SIZE];
 #define LSB_Sensitivity_1000    32.8
 #define LSB_Sensitivity_2000    16.4
 
+#define THRESHOLD               20
+#define THRESHOLD_NEG           (-1 * THRESHOLD)
+
 static uint8_t uMPU6050Init();
 static uint8_t uMPU6050ReadAccelerometer();
 static uint8_t uMPU6050ReadGyroscope();
 static uint8_t uMPU6050ReadTemperature();
 static void vMPU6050CalculateAngles();
+static uint8_t uGetDirection();
 
 static angle_calculations pitch_angle_calculations = {
     .angle = 0.0,
@@ -135,7 +139,6 @@ static angle_calculations roll_angle_calculations = {
 void vMPU6050Task( void *pvParameters )
 {
     uint16_t count = 0;
-    uint8_t status = 0;     // 0 not flipped, 1 rotated, 2 180 degree flipped
 
     if (uMPU6050Init() != MPU6050_SUCESS) {
         vTaskDelete(NULL);
@@ -160,39 +163,13 @@ void vMPU6050Task( void *pvParameters )
         count++;
         if (count >= 20)
         {
-            ESP_LOGI("mpu6050", "Acc: ( %.3f, %.3f, %.3f)", a_x, a_y, a_z);
-            ESP_LOGI("mpu6050", "Gyro: ( %.3f, %.3f, %.3f)", g_x, g_y, g_z);
-            ESP_LOGI("mpu6050", "FPitch: %.3f", angle_pitch);
-            ESP_LOGI("mpu6050", "FRoll: %.3f", angle_roll);
-            ESP_LOGI("mpu6050", "Temperature: %.3f", temperature);
+            // ESP_LOGI("mpu6050", "Acc: ( %.3f, %.3f, %.3f)", a_x, a_y, a_z);
+            // ESP_LOGI("mpu6050", "Gyro: ( %.3f, %.3f, %.3f)", g_x, g_y, g_z);
+            // ESP_LOGI("mpu6050", "FPitch: %.3f", angle_pitch);
+            // ESP_LOGI("mpu6050", "FRoll: %.3f", angle_roll);
+            // ESP_LOGI("mpu6050", "Temperature: %.3f", temperature);
 
-            status = 0;
-            if (angle_pitch > 5 || angle_pitch < -5 || angle_roll > 5 || angle_roll < -5)
-            {
-                status = 1;
-            }
-            else
-            {
-                // angles of pitch and rotation are almost zero, check whether flipped 180 degree or 0 degree
-                if (a_z > 0)
-                {
-                    // flipped 180 degree
-                    status = 2;
-                }
-            }
-
-            if (status == 0)
-            {
-                ESP_LOGI("mpu6050", "MPU6050 is right side");
-            }
-            else if (status == 1)
-            {
-                ESP_LOGI("mpu6050", "MPU6050 is rotated");
-            }
-            else if (status == 2)
-            {
-                ESP_LOGI("mpu6050", "MPU6050 is 180 degree flipped");
-            }
+            uGetDirection();
 
             count = 0;
         }
@@ -447,4 +424,42 @@ void vMPU6050CalculateAngles()
     double roll = atan(a_y / a_z)*57.2958;         // convert the radian to degrees
     angle_pitch = filter(pitch, g_y, &pitch_angle_calculations);
     angle_roll = filter(roll, -g_x, &roll_angle_calculations);
+}
+
+/**
+  * @brief  Get Direction of the MPU 6050, whether it's faced upside down or right position.
+  * @param  None
+  * @retval 0 not flipped, 1 rotated, 2 180 degree flipped
+  */
+uint8_t uGetDirection()
+{
+    uint8_t status = 0;     // 0 not flipped, 1 rotated, 2 180 degree flipped
+    if (angle_pitch > THRESHOLD || angle_pitch < THRESHOLD_NEG || angle_roll > THRESHOLD || angle_roll < THRESHOLD_NEG)
+    {
+        status = 1;
+    }
+    else
+    {
+        // angles of pitch and rotation are almost zero, check whether flipped 180 degree or 0 degree
+        if (a_z > 0)
+        {
+            // flipped 180 degree
+            status = 2;
+        }
+    }
+
+    if (status == 0)
+    {
+        ESP_LOGI("mpu6050", "MPU6050 is right side");
+    }
+    else if (status == 1)
+    {
+        ESP_LOGI("mpu6050", "MPU6050 is rotated");
+    }
+    else if (status == 2)
+    {
+        ESP_LOGI("mpu6050", "MPU6050 is 180 degree flipped");
+    }
+
+    return status;
 }
