@@ -40,11 +40,6 @@
 #define MPU6050_SMPLRT_DIV          0x19
 #define MPU6050_CONFIG              0x1A
 
-//Acelerometer error allowed, make it lower to get more precision, but sketch may not converge  (default:8)
-#define ACCELERATION_DEADZONE       8
- //Giro error allowed, make it lower to get more precision, but sketch may not converge  (default:1)
-#define GYRO_DEADZONE               1
-
 double a_x = 0.0;
 double a_y = 0.0;
 double a_z = 0.0;
@@ -65,32 +60,17 @@ int16_t cal_a_x = 0.0;
 int16_t cal_a_y = 0.0;
 int16_t cal_a_z = 0.0;
 
-int16_t cal_g_x = 0.0;
-int16_t cal_g_y = 0.0;
-int16_t cal_g_z = 0.0;
-
 double angle_pitch = 0.0;
 double angle_roll = 0.0;
 
 double temperature = 0.0;
 
+double senistivity_a_x = 0.0;
+double senistivity_a_y = 0.0;
+double senistivity_a_z = 0.0;
+
 static I2C_Status i2cStatus;
 static uint8_t mpu6050Buffer[MICRO_BUFFER_SIZE];
-
-static int16_t mean_a_x = 0.0;
-static int16_t mean_a_y = 0.0;
-static int16_t mean_a_z = 0.0;
-
-static int16_t mean_g_x = 0.0;
-static int16_t mean_g_y = 0.0;
-static int16_t mean_g_z = 0.0;
-
-static int16_t ax_offset = 0;
-static int16_t ay_offset = 0;
-static int16_t az_offset = 0;
-static int16_t gx_offset = 0;
-static int16_t gy_offset = 0;
-static int16_t gz_offset = 0;
 
 #define MPU6050_SUCESS					 	       0
 #define MPU6050_FAILURE						       1
@@ -121,6 +101,9 @@ static int16_t gz_offset = 0;
 
 #define NUMBER_READINGS_CALIBRATION                     1000
 #define NUMBER_READINGS_CALIBRATION_DISCARDED           100
+#define POSITIONING_DELAY                               5000
+
+uint8_t calibration_mode = CALIBRATION_MODE_ACCURATE;
 
 static uint8_t uMPU6050Init();
 static uint8_t uMPU6050ReadAccelerometer();
@@ -129,7 +112,6 @@ static uint8_t uMPU6050ReadTemperature();
 static void vMPU6050CalculateAngles();
 static uint8_t uGetDirection();
 static void uMPU6050Calibration();
-static void uMeanSensor();
 
 static angle_calculations pitch_angle_calculations = {
     .angle = 0.0,
@@ -341,13 +323,13 @@ uint8_t uMPU6050ReadAccelerometer()
         ((uint16_t)(mpu6050Buffer[4] << 8)) |
         ((uint16_t)(mpu6050Buffer[5]));
 
-    accelration_x -= cal_a_x;
-    accelration_y -= cal_a_y;
-    accelration_z -= cal_a_z;
+    accelration_x += cal_a_x;
+    accelration_y += cal_a_y;
+    accelration_z += cal_a_z;
 
-    a_x = -accelration_x / LSB_Sensitivity_2G;
-    a_y = -accelration_y / LSB_Sensitivity_2G;
-    a_z = -accelration_z / LSB_Sensitivity_2G;
+    a_x = -accelration_x / senistivity_a_x;
+    a_y = -accelration_y / senistivity_a_y;
+    a_z = -accelration_z / senistivity_a_z;
 
     return MPU6050_SUCESS;
 }
@@ -403,10 +385,6 @@ uint8_t uMPU6050ReadGyroscope()
     gyro_z =
         ((uint16_t)(mpu6050Buffer[4] << 8)) |
         ((uint16_t)(mpu6050Buffer[5]));
-
-    gyro_x -= cal_g_x;
-    gyro_y -= cal_g_y;
-    gyro_z -= cal_g_z;
 
     g_x = gyro_x / LSB_Sensitivity_2000;
     g_y = gyro_y / LSB_Sensitivity_2000;
@@ -522,145 +500,275 @@ uint8_t uGetDirection()
   */
 void uMPU6050Calibration()
 {
-    int16_t ready = 0;
-
-    ESP_LOGI("mpu6050", "Your MPU6050 should be placed in horizontal position, with package letters facing up. \nDon't touch it until you see a finish message.\n");
-    vTaskDelay( 10000 / portTICK_RATE_MS );
-
-    uMeanSensor();
-
-    vTaskDelay( 1000 / portTICK_RATE_MS );
-
-    ax_offset =- mean_a_x / 8;
-    ay_offset =- mean_a_y / 8;
-    az_offset=( LSB_Sensitivity_2G - mean_a_z) / 8;
-
-    gx_offset =- mean_g_x / 4;
-    gy_offset =- mean_g_y / 4;
-    gz_offset =- mean_g_z / 4;
-
-    while (1) {
-        ESP_LOGI("mpu6050", "Agiling output");
-      ready = 0;
-      cal_a_x = ax_offset;
-      cal_a_y = ay_offset;
-      cal_a_z = az_offset;
-
-      cal_g_x = gx_offset;
-      cal_g_y = gy_offset;
-      cal_g_z = gz_offset;
-
-      uMeanSensor();
-
-      if (abs(mean_a_x) <= ACCELERATION_DEADZONE) {
-          ready++;
-      }
-      else {
-          ax_offset = ax_offset - (mean_a_x / ACCELERATION_DEADZONE);
-      }
-
-      if (abs(mean_a_y) <= ACCELERATION_DEADZONE) {
-          ready++;
-      }
-      else {
-          ay_offset = ay_offset - (mean_a_y / ACCELERATION_DEADZONE);
-      }
-
-      if (abs(LSB_Sensitivity_2G - mean_a_z) <= ACCELERATION_DEADZONE) {
-          ready++;
-      }
-      else {
-          az_offset = az_offset + ((LSB_Sensitivity_2G - mean_a_z) / ACCELERATION_DEADZONE);
-      }
-
-      if (abs(mean_g_x) <= GYRO_DEADZONE) {
-          ready++;
-      }
-      else {
-          gx_offset = gx_offset - (mean_g_x / (GYRO_DEADZONE + 1));
-      }
-
-      if (abs(mean_g_y) <= GYRO_DEADZONE) {
-          ready++;
-      }
-      else {
-          gy_offset = gy_offset - (mean_g_y / (GYRO_DEADZONE + 1));
-      }
-
-      if (abs(mean_g_z) <= GYRO_DEADZONE) {
-          ready++;
-      }
-      else {
-          gz_offset = gz_offset -( mean_g_z / (GYRO_DEADZONE + 1));
-      }
-
-      if (ready==6) {
-          break;
-      }
-    }
-}
-
-/**
-  * @brief  Get mean radings of MPU6050.
-  * @param  None
-  * @retval None
-  */
-void uMeanSensor()
-{
     uint16_t i = 0;
+    // accelerometer mean readings
     int32_t total_ax_mean = 0;
     int32_t total_ay_mean = 0;
     int32_t total_az_mean = 0;
-    int32_t total_gx_mean = 0;
-    int32_t total_gy_mean = 0;
-    int32_t total_gz_mean = 0;
 
-    ESP_LOGI("mpu6050", "Calculating mean");
+    /* Portrait up */
+    // accelerometer
+    int16_t p_u_ax = 0;
+    int16_t p_u_ay = 0;
+    int16_t p_u_az = 0;
 
-    for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
-        if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
-            uMPU6050ReadAccelerometer();
-            uMPU6050ReadGyroscope();
-            continue;
-        }
+    /* Landscape left */
+    // accelerometer
+    int16_t l_l_ax = 0;
+    int16_t l_l_ay = 0;
+    int16_t l_l_az = 0;
 
-        if (uMPU6050ReadAccelerometer() == MPU6050_SUCESS)
-        {
+    /* Portrait down */
+    // accelerometer
+    int16_t p_d_ax = 0;
+    int16_t p_d_ay = 0;
+    int16_t p_d_az = 0;
+
+    /* Landscape right */
+    // accelerometer
+    int16_t l_r_ax = 0;
+    int16_t l_r_ay = 0;
+    int16_t l_r_az = 0;
+
+    /* Front */
+    // accelerometer
+    int16_t f_ax = 0;
+    int16_t f_ay = 0;
+    int16_t f_az = 0;
+
+    /* Back */
+    // accelerometer
+    int16_t b_ax = 0;
+    int16_t b_ay = 0;
+    int16_t b_az = 0;
+
+    cal_a_x = 0;
+    cal_a_y = 0;
+    cal_a_z = 0;
+
+    senistivity_a_x = LSB_Sensitivity_2G;
+    senistivity_a_y = LSB_Sensitivity_2G;
+    senistivity_a_z = LSB_Sensitivity_2G;
+
+    if (calibration_mode == CALIBRATION_MODE_OFF) {
+        return;
+    } else if (calibration_mode == CALIBRATION_MODE_SIMPLE) {
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's front end and wait util calibration is done");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
             total_ax_mean += accelration_x;
             total_ay_mean += accelration_y;
             total_az_mean += accelration_z;
-        }
-        else
-        {
-            ESP_LOGE("mpu6050", "Failed to calibrate");
-            return;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
         }
 
-        if (uMPU6050ReadGyroscope() == MPU6050_SUCESS)
-        {
-            total_gx_mean += gyro_x;
-            total_gy_mean += gyro_y;
-            total_gz_mean += gyro_z;
-        }
-        else
-        {
-            ESP_LOGE("mpu6050", "Failed to calibrate");
-            return;
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        ESP_LOGI("mpu6050", "Mean Acc: ( %.3d, %.3d, %.3d)", total_ax_mean, total_ay_mean, total_az_mean);
+
+        cal_a_x = -1 * total_ax_mean;
+        cal_a_y = -1 * total_ay_mean;
+        cal_a_z = LSB_Sensitivity_2G - total_az_mean;
+    } else if (calibration_mode == CALIBRATION_MODE_ACCURATE) {
+        /************ Front Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's front end and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
         }
 
-        // in order not to get repeated readings
-        vTaskDelay( 10 / portTICK_RATE_MS );
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        f_ax = total_ax_mean;
+        f_ay = total_ay_mean;
+        f_az = total_az_mean;
+
+        /************ Back Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's back end and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
+        }
+
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        b_ax = total_ax_mean;
+        b_ay = total_ay_mean;
+        b_az = total_az_mean;
+
+        /************ Portrait Up Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's portrait up side and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
+        }
+
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        p_u_ax = total_ax_mean;
+        p_u_ay = total_ay_mean;
+        p_u_az = total_az_mean;
+
+        /************ Portrait Down Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's portrait down side and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
+        }
+
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        p_d_ax = total_ax_mean;
+        p_d_ay = total_ay_mean;
+        p_d_az = total_az_mean;
+
+        /************ Landscape Left Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's landscape left side and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
+        }
+
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        l_l_ax = total_ax_mean;
+        l_l_ay = total_ay_mean;
+        l_l_az = total_az_mean;
+
+        /************ Landscape Right Side  ************/
+        ESP_LOGI("mpu6050", "Place the accelerometer on it's landscape right side and donot touch it");
+        vTaskDelay( POSITIONING_DELAY / portTICK_RATE_MS );
+
+        for (i = 0; i < NUMBER_READINGS_CALIBRATION + NUMBER_READINGS_CALIBRATION_DISCARDED; i++) {
+            // discard first few readings
+            if (i < NUMBER_READINGS_CALIBRATION_DISCARDED) {
+                continue;
+            }
+
+            if (uMPU6050ReadAccelerometer() != MPU6050_SUCESS) {
+                break;
+            }
+
+            total_ax_mean += accelration_x;
+            total_ay_mean += accelration_y;
+            total_az_mean += accelration_z;
+
+            vTaskDelay( 20 / portTICK_RATE_MS );
+        }
+
+        total_ax_mean /= NUMBER_READINGS_CALIBRATION;
+        total_ay_mean /= NUMBER_READINGS_CALIBRATION;
+        total_az_mean /= NUMBER_READINGS_CALIBRATION;
+
+        l_r_ax = total_ax_mean;
+        l_r_ay = total_ay_mean;
+        l_r_az = total_az_mean;
+
+        // Readings are ready
+
+        senistivity_a_x = (l_r_ax - l_l_ax) / 2;
+        senistivity_a_y = (p_u_ay - p_d_ay) / 2;
+        senistivity_a_z = (f_az - b_az) / 2;
+
+        cal_a_x = -1 * (f_ax + b_ax + p_u_ax + p_d_ax) / 4;
+        cal_a_y = -1 * (f_ay + b_ay + l_l_ay + l_r_ay) / 4;
+        cal_a_z = -1 * (l_l_az + l_r_az + p_u_az + p_d_az) / 4;
     }
 
-    mean_a_x = total_ax_mean / NUMBER_READINGS_CALIBRATION;
-    mean_a_y = total_ay_mean / NUMBER_READINGS_CALIBRATION;
-    mean_a_z = total_az_mean / NUMBER_READINGS_CALIBRATION;
 
-    ESP_LOGI("mpu6050", "Mean Acc: ( %.3d, %.3d, %.3d)", mean_a_x, mean_a_y, mean_a_z);
-
-    mean_g_x = total_gx_mean / NUMBER_READINGS_CALIBRATION;
-    mean_g_y = total_gy_mean / NUMBER_READINGS_CALIBRATION;
-    mean_g_z = total_gz_mean / NUMBER_READINGS_CALIBRATION;
-
-    ESP_LOGI("mpu6050", "Mean Gyro: ( %.3d, %.3d, %.3d)", mean_g_x, mean_g_y, mean_g_z);
+    ESP_LOGI("mpu6050", "Calibration is done");
+    ESP_LOGI("mpu6050", "Cal Acc: ( %.3d, %.3d, %.3d)", cal_a_x, cal_a_y, cal_a_z);
 }

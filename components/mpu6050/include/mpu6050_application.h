@@ -14,6 +14,10 @@
 
 #include <stdint.h>
 
+#define CALIBRATION_MODE_OFF        0
+#define CALIBRATION_MODE_SIMPLE     1
+#define CALIBRATION_MODE_ACCURATE   2
+
 extern double a_x;
 extern double a_y;
 extern double a_z;
@@ -34,14 +38,12 @@ extern int16_t cal_a_x;
 extern int16_t cal_a_y;
 extern int16_t cal_a_z;
 
-extern int16_t cal_g_x;
-extern int16_t cal_g_y;
-extern int16_t cal_g_z;
-
 extern double angle_pitch;
 extern double angle_roll;
 
 extern double temperature;
+
+extern uint8_t calibration_mode;
 
 void vMPU6050Task( void *pvParameters );
 
