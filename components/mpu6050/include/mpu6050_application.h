@@ -18,9 +18,25 @@ extern double a_x;
 extern double a_y;
 extern double a_z;
 
+extern int16_t accelration_x;
+extern int16_t accelration_y;
+extern int16_t accelration_z;
+
 extern double g_x;
 extern double g_y;
 extern double g_z;
+
+extern int16_t gyro_x;
+extern int16_t gyro_y;
+extern int16_t gyro_z;
+
+extern int16_t cal_a_x;
+extern int16_t cal_a_y;
+extern int16_t cal_a_z;
+
+extern int16_t cal_g_x;
+extern int16_t cal_g_y;
+extern int16_t cal_g_z;
 
 extern double angle_pitch;
 extern double angle_roll;
